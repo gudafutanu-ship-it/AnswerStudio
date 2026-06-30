@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Answer Studio Build 020a - 文字移動改善</title>
+<style>
+  :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
+  header{height:56px;background:#0f2747;color:#fff;display:flex;align-items:center;padding:0 16px;gap:14px;box-shadow:0 2px 10px #0002}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.02em} header .tag{font-size:12px;opacity:.8}
+  .app{display:grid;grid-template-columns:260px 1fr 300px;height:calc(100vh - 56px);gap:10px;padding:10px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 8px #10203010;overflow:auto}
+  .left,.right{padding:12px}.section{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}.section:last-child{border-bottom:0}
+  h2{font-size:14px;margin:0 0 10px;color:#1f2a44}.hint{font-size:12px;color:var(--muted);line-height:1.55}.small{font-size:12px;color:var(--muted)}
+  button,label.file{width:100%;border:1px solid #c8d4e3;background:#fff;color:#1f2a44;border-radius:9px;padding:9px 10px;margin:4px 0;cursor:pointer;font-weight:650;text-align:center;display:block}
+  button.primary{background:var(--blue);border-color:var(--blue);color:#fff} button.danger{background:#fff;border-color:#fecaca;color:#b91c1c} button.ok{background:#ecfdf5;border-color:#bbf7d0;color:#166534}
+  button.active{outline:3px solid #93c5fd;background:#eff6ff} button:disabled{opacity:.45;cursor:not-allowed}
+  input[type=file]{display:none} input,select{width:100%;padding:8px;border:1px solid #c8d4e3;border-radius:8px;background:#fff;margin:4px 0 8px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.toolbar{display:flex;gap:6px;flex-wrap:wrap}.toolbar button{width:auto;flex:1;min-width:70px}
+  .stageWrap{position:relative;overflow:auto;background:#cfd7e3;border:1px solid var(--line);border-radius:12px;box-shadow:inset 0 0 0 1px #fff5}
+  #stage{position:relative;width:1600px;height:1000px;transform-origin:0 0;}
+  canvas{position:absolute;left:0;top:0;image-rendering:auto}
+  #baseCanvas{z-index:1;background:#fff;box-shadow:0 0 18px #0002}
+  #overlayCanvas{z-index:2;pointer-events:auto;cursor:crosshair}
+  .status{position:absolute;left:12px;bottom:12px;background:#0f172acc;color:#fff;border-radius:9px;padding:7px 10px;font-size:12px;z-index:3;pointer-events:none}
+  .kv{display:grid;grid-template-columns:92px 1fr;gap:4px 8px;font-size:12px;margin-top:8px}.kv div:nth-child(odd){color:var(--muted)}
+  .modeBadge{display:inline-block;background:#e0ecff;color:#1d4ed8;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;margin-bottom:8px}
+  .warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:9px;padding:8px;font-size:12px;line-height:1.5}
+</style>
+</head>
+<body>
+<header><h1>Answer Studio</h1><span class="tag">Build 020a｜文字移動改善</span></header>
+<div class="app">
+  <aside class="panel left">
+    <div class="section">
+      <h2>1. 画像を開く</h2>
+      <label class="file primary">PNG/JPEGを開く<input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
+      <div class="hint">Page Cut Engineで保存した600dpi PNGを1枚開きます。</div>
+    </div>
+    <div class="section">
+      <h2>2. ツール</h2>
+      <button id="toolSelect" class="active">範囲選択</button>
+      <button id="toolWhite">白塗り</button>
+      <button id="toolText">文字入力</button>
+      <button id="toolPan">表示移動</button>
+      <div class="hint">範囲選択：囲む→中をドラッグ→確定。<br>白塗り：囲んだ範囲を白で消します。<br>文字入力：クリック位置に文字を置きます。置いた文字は青枠内をドラッグして動かせます。</div>
+    </div>
+    <div class="section">
+      <h2>3. 範囲操作</h2>
+      <button id="copyBtn">コピー</button>
+      <button id="pasteBtn">貼り付け</button>
+      <button id="commitBtn" class="ok">移動を確定</button>
+      <button id="whiteBtn">選択範囲を白塗り</button>
+      <button id="undoBtn">戻す</button>
+      <button id="clearSelBtn">選択解除</button>
+    </div>
+    <div class="section">
+      <h2>4. 表示</h2>
+      <div class="toolbar"><button data-zoom="0.25">25%</button><button data-zoom="0.5">50%</button><button data-zoom="0.75">75%</button><button data-zoom="1">100%</button></div>
+      <div class="row"><button id="zoomOut">－</button><button id="zoomIn">＋</button></div>
+      <div class="hint">ズームしても編集は元画像ピクセル基準で処理します。</div>
+    </div>
+  </aside>
+
+  <main class="stageWrap" id="stageWrap">
+    <div id="stage">
+      <canvas id="baseCanvas"></canvas>
+      <canvas id="overlayCanvas"></canvas>
+      <div class="status" id="status">画像を開いてください</div>
+    </div>
+  </main>
+
+  <aside class="panel right">
+    <div class="section">
+      <h2>状態</h2>
+      <span class="modeBadge" id="modeBadge">範囲選択</span>
+      <div class="kv">
+        <div>画像</div><div id="imgInfo">-</div>
+        <div>表示</div><div id="zoomInfo">100%</div>
+        <div>選択X</div><div id="selX">-</div>
+        <div>選択Y</div><div id="selY">-</div>
+        <div>幅</div><div id="selW">-</div>
+        <div>高さ</div><div id="selH">-</div>
+      </div>
+    </div>
+    <div class="section">
+      <h2>文字入力 α</h2>
+      <label class="small">文字</label><input id="textValue" value="問8">
+      <label class="small">フォント</label><select id="fontFamily"><option value="Yu Mincho, YuMincho, 'Hiragino Mincho ProN', serif">明朝</option><option value="Yu Gothic, YuGothic, Meiryo, sans-serif">ゴシック</option></select>
+      <label class="small">サイズ pt</label><input id="fontSize" type="number" value="18" step="0.5">
+      <button id="addTextMode" class="primary">文字入力ツールにする</button>
+      <div class="hint">文字は青枠で選択されます。青枠内をドラッグで移動、矢印キーで1px移動、Shift＋矢印で10px移動できます。最後に「移動を確定」で画像に反映します。</div>
+    </div>
+    <div class="section">
+      <h2>保存</h2>
+      <button id="saveBtn" class="primary">PNG保存</button>
+      <div class="warn">α版です。元画像は直接変更せず、読み込んだコピー上で編集します。</div>
+    </div>
+  </aside>
+</div>
+<script>
+(() => {
+  const fileInput = document.getElementById('fileInput');
+  const base = document.getElementById('baseCanvas');
+  const over = document.getElementById('overlayCanvas');
+  const bctx = base.getContext('2d');
+  const octx = over.getContext('2d');
+  const stage = document.getElementById('stage');
+  const wrap = document.getElementById('stageWrap');
+  const status = document.getElementById('status');
+  const imgInfo = document.getElementById('imgInfo');
+  const zoomInfo = document.getElementById('zoomInfo');
+  const modeBadge = document.getElementById('modeBadge');
+  const selX = document.getElementById('selX'), selY = document.getElementById('selY'), selW = document.getElementById('selW'), selH = document.getElementById('selH');
+
+  let img = null, zoom = 1, mode = 'select';
+  let selection = null; // {x,y,w,h}
+  let drag = null; // select/move/text/pan
+  let clip = null; // ImageData
+  let floating = null; // {data,x,y,w,h,origX,origY,visible}
+  let undoStack = [];
+  let texts = []; // {text,x,y,font,size,selected}
+  let activeText = null;
+
+  function setMode(m){ mode=m; modeBadge.textContent = ({select:'範囲選択',white:'白塗り',text:'文字入力',pan:'表示移動'})[m];
+    for(const id of ['toolSelect','toolWhite','toolText','toolPan']) document.getElementById(id).classList.remove('active');
+    document.getElementById({select:'toolSelect',white:'toolWhite',text:'toolText',pan:'toolPan'}[m]).classList.add('active');
+    over.style.cursor = m==='pan'?'grab':m==='text'?'text':'crosshair'; drawOverlay(); }
+  function setZoom(z){ zoom=Math.max(.1, Math.min(4,z)); stage.style.transform=`scale(${zoom})`; zoomInfo.textContent=Math.round(zoom*100)+'%'; }
+  function resizeCanvas(w,h){ base.width=over.width=w; base.height=over.height=h; stage.style.width=w+'px'; stage.style.height=h+'px'; }
+  function pushUndo(){ if(!base.width) return; try{ undoStack.push(bctx.getImageData(0,0,base.width,base.height)); if(undoStack.length>20) undoStack.shift(); }catch(e){} }
+  function restoreUndo(){ const u=undoStack.pop(); if(u){ bctx.putImageData(u,0,0); drawOverlay(); status.textContent='戻しました'; } }
+  function updateInfo(){ if(selection){selX.textContent=Math.round(selection.x); selY.textContent=Math.round(selection.y); selW.textContent=Math.round(selection.w); selH.textContent=Math.round(selection.h);} else {selX.textContent=selY.textContent=selW.textContent=selH.textContent='-';}}
+  function canvasPoint(e){ const r=over.getBoundingClientRect(); return {x:(e.clientX-r.left)/zoom, y:(e.clientY-r.top)/zoom}; }
+  function normRect(a,b){ let x=Math.min(a.x,b.x), y=Math.min(a.y,b.y), w=Math.abs(a.x-b.x), h=Math.abs(a.y-b.y); return {x:Math.round(x),y:Math.round(y),w:Math.round(w),h:Math.round(h)}; }
+  function inRect(p,r){ return r && p.x>=r.x && p.y>=r.y && p.x<=r.x+r.w && p.y<=r.y+r.h; }
+  function drawDashedRect(ctx,r,color='#ef4444'){ if(!r) return; ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=2/zoom; ctx.setLineDash([8/zoom,5/zoom]); ctx.strokeRect(r.x+.5,r.y+.5,r.w,r.h); ctx.restore(); }
+  function drawOverlay(){ octx.clearRect(0,0,over.width,over.height);
+    if(selection) drawDashedRect(octx, selection, '#ef4444');
+    if(floating && floating.visible){ octx.save(); octx.globalAlpha=.55; const tmp=document.createElement('canvas'); tmp.width=floating.w; tmp.height=floating.h; tmp.getContext('2d').putImageData(floating.data,0,0); octx.drawImage(tmp,floating.x,floating.y); octx.globalAlpha=1; drawDashedRect(octx,{x:floating.x,y:floating.y,w:floating.w,h:floating.h},'#16a34a'); octx.restore(); }
+    for(const t of texts){ octx.save(); octx.font=`${t.size}px ${t.font}`; octx.fillStyle='#111'; octx.textBaseline='top'; octx.fillText(t.text,t.x,t.y); if(t.selected){ const m=octx.measureText(t.text); const rr={x:t.x-6,y:t.y-6,w:m.width+12,h:t.size*1.25+12}; octx.save(); octx.fillStyle='rgba(37,99,235,.08)'; octx.fillRect(rr.x,rr.y,rr.w,rr.h); octx.restore(); drawDashedRect(octx,rr,'#2563eb'); } octx.restore(); }
+    updateInfo();
+  }
+  function cropSelection(){ if(!selection || selection.w<1 || selection.h<1) return null; return bctx.getImageData(selection.x,selection.y,selection.w,selection.h); }
+  function makeFloatingFromSelection(){ const data=cropSelection(); if(!data) return; clip={data:data,w:selection.w,h:selection.h}; floating={data:data,x:selection.x,y:selection.y,w:selection.w,h:selection.h,origX:selection.x,origY:selection.y,visible:true}; status.textContent='赤枠の中をドラッグして移動できます'; drawOverlay(); }
+  function commitFloating(){ if(!floating) return; pushUndo(); bctx.putImageData(floating.data,Math.round(floating.x),Math.round(floating.y)); selection={x:Math.round(floating.x),y:Math.round(floating.y),w:floating.w,h:floating.h}; floating=null; status.textContent='移動・貼り付けを確定しました'; drawOverlay(); }
+  function whiteSelection(){ if(!selection) return; pushUndo(); bctx.save(); bctx.fillStyle='#fff'; bctx.fillRect(selection.x,selection.y,selection.w,selection.h); bctx.restore(); status.textContent='白塗りしました'; drawOverlay(); }
+  function drawTextToBase(t){ pushUndo(); bctx.save(); bctx.font=`${t.size}px ${t.font}`; bctx.fillStyle='#111'; bctx.textBaseline='top'; bctx.fillText(t.text,t.x,t.y); bctx.restore(); }
+  function getTextAt(p){ for(let i=texts.length-1;i>=0;i--){ const t=texts[i]; octx.font=`${t.size}px ${t.font}`; const w=octx.measureText(t.text).width, h=t.size*1.25; const pad=12; if(p.x>=t.x-pad && p.y>=t.y-pad && p.x<=t.x+w+pad && p.y<=t.y+h+pad) return t; } return null; }
+  function commitTextsToBase(){ if(!texts.length) return; pushUndo(); for(const t of texts){ bctx.save(); bctx.font=`${t.size}px ${t.font}`; bctx.fillStyle='#111'; bctx.textBaseline='top'; bctx.fillText(t.text,t.x,t.y); bctx.restore(); } texts=[]; activeText=null; drawOverlay(); }
+
+  fileInput.addEventListener('change', e=>{ const f=e.target.files[0]; if(!f) return; const url=URL.createObjectURL(f); const im=new Image(); im.onload=()=>{ img=im; resizeCanvas(im.naturalWidth, im.naturalHeight); bctx.clearRect(0,0,base.width,base.height); bctx.drawImage(im,0,0); selection=null; floating=null; clip=null; texts=[]; undoStack=[]; imgInfo.textContent=`${im.naturalWidth} × ${im.naturalHeight}px`; status.textContent='画像を開きました'; setZoom(Math.min(1, (wrap.clientWidth-30)/im.naturalWidth)); drawOverlay(); URL.revokeObjectURL(url); }; im.src=url; });
+
+  over.addEventListener('mousedown', e=>{ if(!base.width) return; const p=canvasPoint(e);
+    if(mode==='pan'){ drag={type:'pan',sx:e.clientX,sy:e.clientY,sl:wrap.scrollLeft,st:wrap.scrollTop}; over.style.cursor='grabbing'; return; }
+    const hitText=getTextAt(p); if(hitText){ texts.forEach(t=>t.selected=false); hitText.selected=true; activeText=hitText; drag={type:'text',start:p,ox:hitText.x,oy:hitText.y}; status.textContent='文字を選択しました。青枠内をドラッグ、または矢印キーで移動できます'; drawOverlay(); return; }
+    if(floating && inRect(p,{x:floating.x,y:floating.y,w:floating.w,h:floating.h})){ drag={type:'floating',start:p,ox:floating.x,oy:floating.y}; return; }
+    if(mode==='text'){ const text=document.getElementById('textValue').value || '文字'; const font=document.getElementById('fontFamily').value; const pt=parseFloat(document.getElementById('fontSize').value||18); const px=pt*96/72; texts.forEach(t=>t.selected=false); const t={text,x:Math.round(p.x),y:Math.round(p.y),font,size:px,selected:true}; texts.push(t); activeText=t; drag={type:'text',start:p,ox:t.x,oy:t.y}; status.textContent='文字を配置しました。ドラッグや矢印キーで移動できます'; drawOverlay(); return; }
+    if(mode==='white'){ drag={type:'selectWhite',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; drawOverlay(); return; }
+    drag={type:'select',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; floating=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay();
+  });
+  window.addEventListener('mousemove', e=>{ if(!drag) return; if(drag.type==='pan'){ wrap.scrollLeft=drag.sl-(e.clientX-drag.sx); wrap.scrollTop=drag.st-(e.clientY-drag.sy); return; } const p=canvasPoint(e);
+    if(drag.type==='select'||drag.type==='selectWhite'){ selection=normRect(drag.start,p); drawOverlay(); return; }
+    if(drag.type==='floating'){ floating.x=Math.round(drag.ox+(p.x-drag.start.x)); floating.y=Math.round(drag.oy+(p.y-drag.start.y)); selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; drawOverlay(); return; }
+    if(drag.type==='text'){ activeText.x=Math.round(drag.ox+(p.x-drag.start.x)); activeText.y=Math.round(drag.oy+(p.y-drag.start.y)); drawOverlay(); return; }
+  });
+  window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました。コピーまたは赤枠内ドラッグで移動できます'; makeFloatingFromSelection(); }
+    if(was==='selectWhite'){ whiteSelection(); }
+  });
+  window.addEventListener('keydown', e=>{ const step=e.shiftKey?10:1; let used=false; if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){ let dx=0,dy=0; if(e.key==='ArrowLeft')dx=-step; if(e.key==='ArrowRight')dx=step; if(e.key==='ArrowUp')dy=-step; if(e.key==='ArrowDown')dy=step; if(floating){ floating.x+=dx; floating.y+=dy; selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; used=true; } else if(activeText){ activeText.x+=dx; activeText.y+=dy; used=true; } if(used){ e.preventDefault(); drawOverlay(); } }
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'){ e.preventDefault(); if(selection){ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; } } }
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'){ e.preventDefault(); pasteAtOffset(); }
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); restoreUndo(); }
+    if(e.key==='Enter'){ commitFloating(); }
+    if(e.key==='Escape'){ floating=null; selection=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay(); }
+  });
+  function pasteAtOffset(){ if(!clip) return; const x=selection?selection.x+20:20, y=selection?selection.y+20:20; floating={data:clip.data,x,y,w:clip.w,h:clip.h,origX:x,origY:y,visible:true}; selection={x,y,w:clip.w,h:clip.h}; status.textContent='貼り付けました。ドラッグして位置を調整し、確定してください'; drawOverlay(); }
+
+  document.getElementById('toolSelect').onclick=()=>setMode('select'); document.getElementById('toolWhite').onclick=()=>setMode('white'); document.getElementById('toolText').onclick=()=>setMode('text'); document.getElementById('toolPan').onclick=()=>setMode('pan'); document.getElementById('addTextMode').onclick=()=>setMode('text');
+  document.getElementById('copyBtn').onclick=()=>{ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; }};
+  document.getElementById('pasteBtn').onclick=pasteAtOffset; document.getElementById('commitBtn').onclick=()=>{ if(floating) commitFloating(); else if(texts.length){ commitTextsToBase(); status.textContent='文字を画像に確定しました'; }};
+  document.getElementById('whiteBtn').onclick=whiteSelection; document.getElementById('undoBtn').onclick=restoreUndo; document.getElementById('clearSelBtn').onclick=()=>{selection=null; floating=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay();};
+  document.getElementById('saveBtn').onclick=()=>{ commitTextsToBase(); const a=document.createElement('a'); a.href=base.toDataURL('image/png'); a.download='answer_studio_edited.png'; a.click(); };
+  document.querySelectorAll('[data-zoom]').forEach(b=>b.onclick=()=>setZoom(parseFloat(b.dataset.zoom))); document.getElementById('zoomOut').onclick=()=>setZoom(zoom/1.2); document.getElementById('zoomIn').onclick=()=>setZoom(zoom*1.2);
+  setMode('select');
+})();
+</script>
+</body>
+</html>
