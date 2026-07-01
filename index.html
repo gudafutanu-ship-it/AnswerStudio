@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Answer Studio Build 021 - 線ツール追加</title>
+<title>Answer Studio Build 021a - 線移動とShift固定</title>
 <style>
   :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<header><h1>Answer Studio</h1><span class="tag">Build 021｜線ツール追加</span></header>
+<header><h1>Answer Studio</h1><span class="tag">Build 021a｜線移動・Shift水平垂直</span></header>
 <div class="app">
   <aside class="panel left">
     <div class="section">
@@ -45,7 +45,7 @@
       <button id="toolText">文字入力</button>
       <button id="toolLine">線</button>
       <button id="toolPan">表示移動</button>
-      <div class="hint">範囲選択：囲む→中をドラッグ→確定。<br>白塗り：囲んだ範囲を白で消します。<br>文字入力：クリック位置に文字を置きます。置いた文字は青枠内をドラッグして動かせます。<br>線：始点から終点へドラッグして線を引きます。</div>
+      <div class="hint">範囲選択：囲む→中をドラッグ→確定。<br>白塗り：囲んだ範囲を白で消します。<br>文字入力：クリック位置に文字を置きます。置いた文字は青枠内をドラッグして動かせます。<br>線：始点から終点へドラッグして線を引きます。Shiftを押しながら描くと水平・垂直に固定します。描いた線はクリックして移動できます。</div>
     </div>
     <div class="section">
       <h2>3. 範囲操作</h2>
@@ -89,7 +89,7 @@
       <h2>線ツール α</h2>
       <label class="small">線の太さ px</label><input id="lineWidth" type="number" value="2" min="0.5" step="0.5">
       <button id="addLineMode" class="primary">線ツールにする</button>
-      <div class="hint">始点で押して終点までドラッグします。水平・垂直に合わせたい時は、後のBuildでスナップを入れます。</div>
+      <div class="hint">始点で押して終点までドラッグします。Shiftを押しながら描くと、水平・垂直に固定します。描いた線はクリックして選択し、ドラッグや矢印キーで移動できます。</div>
     </div>
     <div class="section">
       <h2>文字入力 α</h2>
@@ -122,19 +122,25 @@
   const selX = document.getElementById('selX'), selY = document.getElementById('selY'), selW = document.getElementById('selW'), selH = document.getElementById('selH');
 
   let img = null, zoom = 1, mode = 'select';
-  let selection = null; // {x,y,w,h}
-  let drag = null; // select/move/text/pan
-  let clip = null; // ImageData
-  let floating = null; // {data,x,y,w,h,origX,origY,visible}
+  let selection = null;
+  let drag = null;
+  let clip = null;
+  let floating = null;
   let undoStack = [];
-  let texts = []; // {text,x,y,font,size,selected}
+  let texts = [];
+  let lines = [];
   let activeText = null;
-  let linePreview = null; // {x1,y1,x2,y2,w}
+  let activeLine = null;
+  let linePreview = null;
 
-  function setMode(m){ mode=m; modeBadge.textContent = ({select:'範囲選択',white:'白塗り',text:'文字入力',line:'線',pan:'表示移動'})[m];
+  function setMode(m){
+    mode=m;
+    modeBadge.textContent = ({select:'範囲選択',white:'白塗り',text:'文字入力',line:'線',pan:'表示移動'})[m];
     for(const id of ['toolSelect','toolWhite','toolText','toolLine','toolPan']) document.getElementById(id).classList.remove('active');
     document.getElementById({select:'toolSelect',white:'toolWhite',text:'toolText',line:'toolLine',pan:'toolPan'}[m]).classList.add('active');
-    over.style.cursor = m==='pan'?'grab':m==='text'?'text':m==='line'?'crosshair':'crosshair'; drawOverlay(); }
+    over.style.cursor = m==='pan'?'grab':m==='text'?'text':m==='line'?'crosshair':'crosshair';
+    drawOverlay();
+  }
   function setZoom(z){ zoom=Math.max(.1, Math.min(4,z)); stage.style.transform=`scale(${zoom})`; zoomInfo.textContent=Math.round(zoom*100)+'%'; }
   function resizeCanvas(w,h){ base.width=over.width=w; base.height=over.height=h; stage.style.width=w+'px'; stage.style.height=h+'px'; }
   function pushUndo(){ if(!base.width) return; try{ undoStack.push(bctx.getImageData(0,0,base.width,base.height)); if(undoStack.length>20) undoStack.shift(); }catch(e){} }
@@ -144,56 +150,73 @@
   function normRect(a,b){ let x=Math.min(a.x,b.x), y=Math.min(a.y,b.y), w=Math.abs(a.x-b.x), h=Math.abs(a.y-b.y); return {x:Math.round(x),y:Math.round(y),w:Math.round(w),h:Math.round(h)}; }
   function inRect(p,r){ return r && p.x>=r.x && p.y>=r.y && p.x<=r.x+r.w && p.y<=r.y+r.h; }
   function drawDashedRect(ctx,r,color='#ef4444'){ if(!r) return; ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=2/zoom; ctx.setLineDash([8/zoom,5/zoom]); ctx.strokeRect(r.x+.5,r.y+.5,r.w,r.h); ctx.restore(); }
-  function drawOverlay(){ octx.clearRect(0,0,over.width,over.height);
+  function lineBounds(l){ return {x:Math.min(l.x1,l.x2),y:Math.min(l.y1,l.y2),w:Math.abs(l.x2-l.x1),h:Math.abs(l.y2-l.y1)}; }
+  function distToLine(p,l){ const x1=l.x1,y1=l.y1,x2=l.x2,y2=l.y2; const dx=x2-x1,dy=y2-y1; const len2=dx*dx+dy*dy; if(len2===0) return Math.hypot(p.x-x1,p.y-y1); let t=((p.x-x1)*dx+(p.y-y1)*dy)/len2; t=Math.max(0,Math.min(1,t)); const px=x1+t*dx, py=y1+t*dy; return Math.hypot(p.x-px,p.y-py); }
+  function getLineAt(p){ for(let i=lines.length-1;i>=0;i--){ const l=lines[i]; if(distToLine(p,l)<=Math.max(6,l.w+4)) return l; } return null; }
+  function snapLineEnd(start,p,shift){ let x2=p.x,y2=p.y; if(shift){ const dx=Math.abs(p.x-start.x), dy=Math.abs(p.y-start.y); if(dx>=dy) y2=start.y; else x2=start.x; } return {x2:Math.round(x2),y2:Math.round(y2)}; }
+
+  function drawTextObj(ctx,t){ ctx.save(); ctx.font=`${t.size}px ${t.font}`; ctx.fillStyle='#111'; ctx.textBaseline='top'; ctx.fillText(t.text,t.x,t.y); ctx.restore(); }
+  function drawLineObj(ctx,l,preview=false){ ctx.save(); ctx.strokeStyle=preview?'#2563eb':'#111'; ctx.lineWidth=Math.max(1,l.w); if(preview) ctx.setLineDash([6,4]); ctx.beginPath(); ctx.moveTo(l.x1,l.y1); ctx.lineTo(l.x2,l.y2); ctx.stroke(); ctx.restore(); }
+  function drawLineSelection(l){ const b=lineBounds(l); drawDashedRect(octx,{x:b.x-6,y:b.y-6,w:b.w+12,h:b.h+12},'#2563eb'); octx.save(); octx.fillStyle='#fff'; octx.strokeStyle='#2563eb'; octx.lineWidth=2/zoom; for(const pt of [{x:l.x1,y:l.y1},{x:l.x2,y:l.y2}]){ octx.fillRect(pt.x-4,pt.y-4,8,8); octx.strokeRect(pt.x-4,pt.y-4,8,8); } octx.restore(); }
+
+  function drawOverlay(){
+    octx.clearRect(0,0,over.width,over.height);
+    for(const l of lines){ drawLineObj(octx,l); if(l.selected) drawLineSelection(l); }
     if(selection) drawDashedRect(octx, selection, '#ef4444');
-    if(linePreview){ octx.save(); octx.strokeStyle='#2563eb'; octx.lineWidth=Math.max(1,linePreview.w); octx.setLineDash([6,4]); octx.beginPath(); octx.moveTo(linePreview.x1,linePreview.y1); octx.lineTo(linePreview.x2,linePreview.y2); octx.stroke(); octx.restore(); }
-    if(floating && floating.visible){ octx.save(); octx.globalAlpha=.55; const tmp=document.createElement('canvas'); tmp.width=floating.w; tmp.height=floating.h; tmp.getContext('2d').putImageData(floating.data,0,0); octx.drawImage(tmp,floating.x,floating.y); octx.globalAlpha=1; drawDashedRect(octx,{x:floating.x,y:floating.y,w:floating.w,h:floating.h},'#16a34a'); octx.restore(); }
-    for(const t of texts){ octx.save(); octx.font=`${t.size}px ${t.font}`; octx.fillStyle='#111'; octx.textBaseline='top'; octx.fillText(t.text,t.x,t.y); if(t.selected){ const m=octx.measureText(t.text); const rr={x:t.x-6,y:t.y-6,w:m.width+12,h:t.size*1.25+12}; octx.save(); octx.fillStyle='rgba(37,99,235,.08)'; octx.fillRect(rr.x,rr.y,rr.w,rr.h); octx.restore(); drawDashedRect(octx,rr,'#2563eb'); } octx.restore(); }
+    if(linePreview){ drawLineObj(octx,linePreview,true); }
+    if(floating && floating.visible){
+      octx.save(); octx.globalAlpha=.55;
+      const tmp=document.createElement('canvas'); tmp.width=floating.w; tmp.height=floating.h; tmp.getContext('2d').putImageData(floating.data,0,0);
+      octx.drawImage(tmp,floating.x,floating.y); octx.globalAlpha=1;
+      drawDashedRect(octx,{x:floating.x,y:floating.y,w:floating.w,h:floating.h},'#16a34a'); octx.restore();
+    }
+    for(const t of texts){ drawTextObj(octx,t); if(t.selected){ octx.save(); octx.font=`${t.size}px ${t.font}`; const m=octx.measureText(t.text); const rr={x:t.x-6,y:t.y-6,w:m.width+12,h:t.size*1.25+12}; octx.fillStyle='rgba(37,99,235,.08)'; octx.fillRect(rr.x,rr.y,rr.w,rr.h); octx.restore(); drawDashedRect(octx,rr,'#2563eb'); } }
     updateInfo();
   }
   function cropSelection(){ if(!selection || selection.w<1 || selection.h<1) return null; return bctx.getImageData(selection.x,selection.y,selection.w,selection.h); }
   function makeFloatingFromSelection(){ const data=cropSelection(); if(!data) return; clip={data:data,w:selection.w,h:selection.h}; floating={data:data,x:selection.x,y:selection.y,w:selection.w,h:selection.h,origX:selection.x,origY:selection.y,visible:true}; status.textContent='赤枠の中をドラッグして移動できます'; drawOverlay(); }
   function commitFloating(){ if(!floating) return; pushUndo(); bctx.putImageData(floating.data,Math.round(floating.x),Math.round(floating.y)); selection={x:Math.round(floating.x),y:Math.round(floating.y),w:floating.w,h:floating.h}; floating=null; status.textContent='移動・貼り付けを確定しました'; drawOverlay(); }
   function whiteSelection(){ if(!selection) return; pushUndo(); bctx.save(); bctx.fillStyle='#fff'; bctx.fillRect(selection.x,selection.y,selection.w,selection.h); bctx.restore(); status.textContent='白塗りしました'; drawOverlay(); }
-  function drawTextToBase(t){ pushUndo(); bctx.save(); bctx.font=`${t.size}px ${t.font}`; bctx.fillStyle='#111'; bctx.textBaseline='top'; bctx.fillText(t.text,t.x,t.y); bctx.restore(); }
   function getTextAt(p){ for(let i=texts.length-1;i>=0;i--){ const t=texts[i]; octx.font=`${t.size}px ${t.font}`; const w=octx.measureText(t.text).width, h=t.size*1.25; const pad=12; if(p.x>=t.x-pad && p.y>=t.y-pad && p.x<=t.x+w+pad && p.y<=t.y+h+pad) return t; } return null; }
-  function commitTextsToBase(){ if(!texts.length) return; pushUndo(); for(const t of texts){ bctx.save(); bctx.font=`${t.size}px ${t.font}`; bctx.fillStyle='#111'; bctx.textBaseline='top'; bctx.fillText(t.text,t.x,t.y); bctx.restore(); } texts=[]; activeText=null; drawOverlay(); }
+  function commitObjectsToBase(){ if(!texts.length && !lines.length) return; pushUndo(); for(const l of lines) drawLineObj(bctx,l); for(const t of texts) drawTextObj(bctx,t); texts=[]; lines=[]; activeText=null; activeLine=null; drawOverlay(); }
 
-  fileInput.addEventListener('change', e=>{ const f=e.target.files[0]; if(!f) return; const url=URL.createObjectURL(f); const im=new Image(); im.onload=()=>{ img=im; resizeCanvas(im.naturalWidth, im.naturalHeight); bctx.clearRect(0,0,base.width,base.height); bctx.drawImage(im,0,0); selection=null; floating=null; clip=null; texts=[]; undoStack=[]; imgInfo.textContent=`${im.naturalWidth} × ${im.naturalHeight}px`; status.textContent='画像を開きました'; setZoom(Math.min(1, (wrap.clientWidth-30)/im.naturalWidth)); drawOverlay(); URL.revokeObjectURL(url); }; im.src=url; });
+  fileInput.addEventListener('change', e=>{ const f=e.target.files[0]; if(!f) return; const url=URL.createObjectURL(f); const im=new Image(); im.onload=()=>{ img=im; resizeCanvas(im.naturalWidth, im.naturalHeight); bctx.clearRect(0,0,base.width,base.height); bctx.drawImage(im,0,0); selection=null; floating=null; clip=null; texts=[]; lines=[]; activeText=null; activeLine=null; undoStack=[]; imgInfo.textContent=`${im.naturalWidth} × ${im.naturalHeight}px`; status.textContent='画像を開きました'; setZoom(Math.min(1, (wrap.clientWidth-30)/im.naturalWidth)); drawOverlay(); URL.revokeObjectURL(url); }; im.src=url; });
 
   over.addEventListener('mousedown', e=>{ if(!base.width) return; const p=canvasPoint(e);
     if(mode==='pan'){ drag={type:'pan',sx:e.clientX,sy:e.clientY,sl:wrap.scrollLeft,st:wrap.scrollTop}; over.style.cursor='grabbing'; return; }
-    const hitText=getTextAt(p); if(hitText){ texts.forEach(t=>t.selected=false); hitText.selected=true; activeText=hitText; drag={type:'text',start:p,ox:hitText.x,oy:hitText.y}; status.textContent='文字を選択しました。青枠内をドラッグ、または矢印キーで移動できます'; drawOverlay(); return; }
+    const hitText=getTextAt(p); if(hitText){ texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); hitText.selected=true; activeText=hitText; activeLine=null; drag={type:'text',start:p,ox:hitText.x,oy:hitText.y}; status.textContent='文字を選択しました'; drawOverlay(); return; }
+    const hitLine=getLineAt(p); if(hitLine && mode!=='line'){ texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); hitLine.selected=true; activeLine=hitLine; activeText=null; drag={type:'lineMove',start:p,ox1:hitLine.x1,oy1:hitLine.y1,ox2:hitLine.x2,oy2:hitLine.y2}; status.textContent='線を選択しました。ドラッグや矢印キーで移動できます'; drawOverlay(); return; }
     if(floating && inRect(p,{x:floating.x,y:floating.y,w:floating.w,h:floating.h})){ drag={type:'floating',start:p,ox:floating.x,oy:floating.y}; return; }
-    if(mode==='text'){ const text=document.getElementById('textValue').value || '文字'; const font=document.getElementById('fontFamily').value; const pt=parseFloat(document.getElementById('fontSize').value||18); const px=pt*96/72; texts.forEach(t=>t.selected=false); const t={text,x:Math.round(p.x),y:Math.round(p.y),font,size:px,selected:true}; texts.push(t); activeText=t; drag={type:'text',start:p,ox:t.x,oy:t.y}; status.textContent='文字を配置しました。ドラッグや矢印キーで移動できます'; drawOverlay(); return; }
+    if(mode==='text'){ const text=document.getElementById('textValue').value || '文字'; const font=document.getElementById('fontFamily').value; const pt=parseFloat(document.getElementById('fontSize').value||18); const px=pt*96/72; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); const t={text,x:Math.round(p.x),y:Math.round(p.y),font,size:px,selected:true}; texts.push(t); activeText=t; activeLine=null; drag={type:'text',start:p,ox:t.x,oy:t.y}; status.textContent='文字を配置しました'; drawOverlay(); return; }
     if(mode==='line'){ const lw=parseFloat(document.getElementById('lineWidth').value||2); drag={type:'line',start:p,current:p,w:lw}; linePreview={x1:Math.round(p.x),y1:Math.round(p.y),x2:Math.round(p.x),y2:Math.round(p.y),w:lw}; drawOverlay(); return; }
     if(mode==='white'){ drag={type:'selectWhite',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; drawOverlay(); return; }
-    drag={type:'select',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; floating=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay();
+    drag={type:'select',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; floating=null; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); activeText=null; activeLine=null; drawOverlay();
   });
   window.addEventListener('mousemove', e=>{ if(!drag) return; if(drag.type==='pan'){ wrap.scrollLeft=drag.sl-(e.clientX-drag.sx); wrap.scrollTop=drag.st-(e.clientY-drag.sy); return; } const p=canvasPoint(e);
     if(drag.type==='select'||drag.type==='selectWhite'){ selection=normRect(drag.start,p); drawOverlay(); return; }
-    if(drag.type==='line'){ linePreview={x1:Math.round(drag.start.x),y1:Math.round(drag.start.y),x2:Math.round(p.x),y2:Math.round(p.y),w:drag.w}; drawOverlay(); return; }
+    if(drag.type==='line'){ const end=snapLineEnd(drag.start,p,e.shiftKey); linePreview={x1:Math.round(drag.start.x),y1:Math.round(drag.start.y),x2:end.x2,y2:end.y2,w:drag.w}; drawOverlay(); return; }
     if(drag.type==='floating'){ floating.x=Math.round(drag.ox+(p.x-drag.start.x)); floating.y=Math.round(drag.oy+(p.y-drag.start.y)); selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; drawOverlay(); return; }
     if(drag.type==='text'){ activeText.x=Math.round(drag.ox+(p.x-drag.start.x)); activeText.y=Math.round(drag.oy+(p.y-drag.start.y)); drawOverlay(); return; }
+    if(drag.type==='lineMove'){ const dx=Math.round(p.x-drag.start.x), dy=Math.round(p.y-drag.start.y); activeLine.x1=drag.ox1+dx; activeLine.y1=drag.oy1+dy; activeLine.x2=drag.ox2+dx; activeLine.y2=drag.oy2+dy; drawOverlay(); return; }
   });
-  window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました。コピーまたは赤枠内ドラッグで移動できます'; makeFloatingFromSelection(); }
+  window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました'; makeFloatingFromSelection(); }
     if(was==='selectWhite'){ whiteSelection(); }
-    if(was==='line' && linePreview){ pushUndo(); bctx.save(); bctx.strokeStyle='#111'; bctx.lineWidth=Math.max(1,linePreview.w); bctx.beginPath(); bctx.moveTo(linePreview.x1,linePreview.y1); bctx.lineTo(linePreview.x2,linePreview.y2); bctx.stroke(); bctx.restore(); linePreview=null; status.textContent='線を引きました'; drawOverlay(); }
+    if(was==='line' && linePreview){ lines.forEach(l=>l.selected=false); texts.forEach(t=>t.selected=false); linePreview.selected=true; lines.push(linePreview); activeLine=linePreview; activeText=null; selection=lineBounds(linePreview); linePreview=null; status.textContent='線を作成しました。クリックして移動できます'; drawOverlay(); }
   });
-  window.addEventListener('keydown', e=>{ const step=e.shiftKey?10:1; let used=false; if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){ let dx=0,dy=0; if(e.key==='ArrowLeft')dx=-step; if(e.key==='ArrowRight')dx=step; if(e.key==='ArrowUp')dy=-step; if(e.key==='ArrowDown')dy=step; if(floating){ floating.x+=dx; floating.y+=dy; selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; used=true; } else if(activeText){ activeText.x+=dx; activeText.y+=dy; used=true; } if(used){ e.preventDefault(); drawOverlay(); } }
+  window.addEventListener('keydown', e=>{ const step=e.shiftKey?10:1; let used=false; if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){ let dx=0,dy=0; if(e.key==='ArrowLeft')dx=-step; if(e.key==='ArrowRight')dx=step; if(e.key==='ArrowUp')dy=-step; if(e.key==='ArrowDown')dy=step; if(floating){ floating.x+=dx; floating.y+=dy; selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; used=true; } else if(activeText){ activeText.x+=dx; activeText.y+=dy; used=true; } else if(activeLine){ activeLine.x1+=dx; activeLine.x2+=dx; activeLine.y1+=dy; activeLine.y2+=dy; selection=lineBounds(activeLine); used=true; } if(used){ e.preventDefault(); drawOverlay(); } }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'){ e.preventDefault(); if(selection){ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; } } }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'){ e.preventDefault(); pasteAtOffset(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); restoreUndo(); }
-    if(e.key==='Enter'){ commitFloating(); }
-    if(e.key==='Escape'){ floating=null; selection=null; linePreview=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay(); }
+    if(e.key==='Enter'){ if(floating) commitFloating(); else commitObjectsToBase(); }
+    if(e.key==='Escape'){ floating=null; selection=null; linePreview=null; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); activeText=null; activeLine=null; drawOverlay(); }
   });
   function pasteAtOffset(){ if(!clip) return; const x=selection?selection.x+20:20, y=selection?selection.y+20:20; floating={data:clip.data,x,y,w:clip.w,h:clip.h,origX:x,origY:y,visible:true}; selection={x,y,w:clip.w,h:clip.h}; status.textContent='貼り付けました。ドラッグして位置を調整し、確定してください'; drawOverlay(); }
 
   document.getElementById('toolSelect').onclick=()=>setMode('select'); document.getElementById('toolWhite').onclick=()=>setMode('white'); document.getElementById('toolText').onclick=()=>setMode('text'); document.getElementById('toolLine').onclick=()=>setMode('line'); document.getElementById('toolPan').onclick=()=>setMode('pan'); document.getElementById('addTextMode').onclick=()=>setMode('text'); document.getElementById('addLineMode').onclick=()=>setMode('line');
   document.getElementById('copyBtn').onclick=()=>{ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; }};
-  document.getElementById('pasteBtn').onclick=pasteAtOffset; document.getElementById('commitBtn').onclick=()=>{ if(floating) commitFloating(); else if(texts.length){ commitTextsToBase(); status.textContent='文字を画像に確定しました'; }};
-  document.getElementById('whiteBtn').onclick=whiteSelection; document.getElementById('undoBtn').onclick=restoreUndo; document.getElementById('clearSelBtn').onclick=()=>{selection=null; floating=null; texts.forEach(t=>t.selected=false); activeText=null; drawOverlay();};
-  document.getElementById('saveBtn').onclick=()=>{ commitTextsToBase(); const a=document.createElement('a'); a.href=base.toDataURL('image/png'); a.download='answer_studio_edited.png'; a.click(); };
+  document.getElementById('pasteBtn').onclick=pasteAtOffset; document.getElementById('commitBtn').onclick=()=>{ if(floating) commitFloating(); else {commitObjectsToBase(); status.textContent='文字・線を画像に確定しました';} };
+  document.getElementById('whiteBtn').onclick=whiteSelection; document.getElementById('undoBtn').onclick=restoreUndo; document.getElementById('clearSelBtn').onclick=()=>{selection=null; floating=null; linePreview=null; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); activeText=null; activeLine=null; drawOverlay();};
+  document.getElementById('saveBtn').onclick=()=>{ const out=document.createElement('canvas'); out.width=base.width; out.height=base.height; const ctx=out.getContext('2d'); ctx.drawImage(base,0,0); for(const l of lines) drawLineObj(ctx,l); for(const t of texts) drawTextObj(ctx,t); const a=document.createElement('a'); a.href=out.toDataURL('image/png'); a.download='answer_studio_edited.png'; a.click(); };
   document.querySelectorAll('[data-zoom]').forEach(b=>b.onclick=()=>setZoom(parseFloat(b.dataset.zoom))); document.getElementById('zoomOut').onclick=()=>setZoom(zoom/1.2); document.getElementById('zoomIn').onclick=()=>setZoom(zoom*1.2);
   setMode('select');
 })();
