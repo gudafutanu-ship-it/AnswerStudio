@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Answer Studio Build 021c - 縦書き文字・コピー安定版</title>
+<title>Answer Studio Build 022 - 文字ツール安定版</title>
 <style>
   :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<header><h1>Answer Studio</h1><span class="tag">Build 021c｜縦書き文字・コピー安定版</span></header>
+<header><h1>Answer Studio</h1><span class="tag">Build 022｜文字ツール安定版</span></header>
 <div class="app">
   <aside class="panel left">
     <div class="section">
@@ -45,7 +45,7 @@
       <button id="toolText">文字入力</button>
       <button id="toolLine">線</button>
       <button id="toolPan">表示移動</button>
-      <div class="hint">範囲選択：囲む→中をドラッグ→確定。コピーは確定後に解除されます。<br>白塗り：囲んだ範囲を白で消します。<br>文字入力：クリック位置に文字を置きます。置いた文字は青枠内をドラッグして動かせます。<br>線：始点から終点へドラッグして線を引きます。Shiftを押しながら描くと水平・垂直に固定します。描いた線はクリックして移動できます。</div>
+      <div class="hint">範囲選択：囲む→中をドラッグ→確定。コピーは確定後に解除されます。<br>白塗り：囲んだ範囲を白で消します。<br>文字入力：クリック位置に文字を1回だけ置き、自動で選択モードへ戻ります。置いた文字は青枠内をドラッグして動かせます。<br>線：始点から終点へドラッグして線を引きます。Shiftを押しながら描くと水平・垂直に固定します。描いた線はクリックして移動できます。</div>
     </div>
     <div class="section">
       <h2>3. 範囲操作</h2>
@@ -96,9 +96,9 @@
       <label class="small">文字</label><input id="textValue" value="問8">
       <label class="small">フォント</label><select id="fontFamily"><option value="Yu Mincho, YuMincho, 'Hiragino Mincho ProN', serif">明朝</option><option value="Yu Gothic, YuGothic, Meiryo, sans-serif">ゴシック</option></select>
       <label class="small">サイズ pt</label><input id="fontSize" type="number" value="18" step="0.5">
-      <label class="small" style="display:flex;align-items:center;gap:8px;margin:6px 0 8px"><input id="verticalText" type="checkbox" style="width:auto;margin:0"> 縦書き</label>
+      <label class="small" style="display:flex;align-items:center;gap:8px;margin:6px 0 8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px"><input id="verticalText" type="checkbox" style="width:auto;margin:0"> 縦書き（一文字ずつ縦に並べる）</label>
       <button id="addTextMode" class="primary">文字入力ツールにする</button>
-      <div class="hint">文字は青枠で選択されます。縦書きチェックで1文字ずつ縦に並べます。青枠内をドラッグで移動、矢印キーで1px移動、Shift＋矢印で10px移動できます。</div>
+      <div class="hint">文字は青枠で選択されます。縦書きにしたい場合は、先に「縦書き」にチェックを入れてから配置します。配置後は自動で範囲選択に戻るので、クリックするたびに増え続けません。青枠内をドラッグで移動、矢印キーで1px移動、Shift＋矢印で10px移動できます。Deleteで選択文字を削除できます。</div>
     </div>
     <div class="section">
       <h2>保存</h2>
@@ -240,6 +240,13 @@
     if(drag.type==='lineMove'){ const dx=Math.round(p.x-drag.start.x), dy=Math.round(p.y-drag.start.y); activeLine.x1=drag.ox1+dx; activeLine.y1=drag.oy1+dy; activeLine.x2=drag.ox2+dx; activeLine.y2=drag.oy2+dy; drawOverlay(); return; }
   });
   window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; const savedDrag=drag; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました'; makeFloatingFromSelection(); }
+    if(was==='text'){
+      // 文字は1回配置したら自動で選択モードへ戻します。クリックするたびに増え続けるのを防ぎます。
+      setMode('select');
+      status.textContent='文字を配置しました。青枠内をドラッグ、または矢印キーで微調整できます';
+      drawOverlay();
+      return;
+    }
     if(was==='selectWhite'){ whiteSelection(); }
     if(was==='line' && linePreview){
       // mouseup時にもShift状態を反映して、水平・垂直固定を確実にします。
@@ -252,6 +259,7 @@
   window.addEventListener('keydown', e=>{ const step=e.shiftKey?10:1; let used=false; if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){ let dx=0,dy=0; if(e.key==='ArrowLeft')dx=-step; if(e.key==='ArrowRight')dx=step; if(e.key==='ArrowUp')dy=-step; if(e.key==='ArrowDown')dy=step; if(floating){ floating.x+=dx; floating.y+=dy; selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; used=true; } else if(activeText){ activeText.x+=dx; activeText.y+=dy; used=true; } else if(activeLine){ activeLine.x1+=dx; activeLine.x2+=dx; activeLine.y1+=dy; activeLine.y2+=dy; selection=lineBounds(activeLine); used=true; } if(used){ e.preventDefault(); drawOverlay(); } }
     if(activeLine && e.key.toLowerCase()==='h'){ e.preventDefault(); activeLine.y2=activeLine.y1; selection=lineBounds(activeLine); status.textContent='線を水平にしました'; drawOverlay(); }
     if(activeLine && e.key.toLowerCase()==='v'){ e.preventDefault(); activeLine.x2=activeLine.x1; selection=lineBounds(activeLine); status.textContent='線を垂直にしました'; drawOverlay(); }
+    if((e.key==='Delete'||e.key==='Backspace') && activeText){ e.preventDefault(); texts=texts.filter(t=>t!==activeText); activeText=null; selection=null; status.textContent='選択中の文字を削除しました'; drawOverlay(); return; }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'){ e.preventDefault(); if(selection){ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; } } }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'){ e.preventDefault(); pasteAtOffset(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); restoreUndo(); }
