@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Answer Studio Build 021a - 線移動とShift固定</title>
+<title>Answer Studio Build 021b - 線ツール安定版</title>
 <style>
   :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<header><h1>Answer Studio</h1><span class="tag">Build 021a｜線移動・Shift水平垂直</span></header>
+<header><h1>Answer Studio</h1><span class="tag">Build 021b｜線ツール安定版</span></header>
 <div class="app">
   <aside class="panel left">
     <div class="section">
@@ -89,7 +89,7 @@
       <h2>線ツール α</h2>
       <label class="small">線の太さ px</label><input id="lineWidth" type="number" value="2" min="0.5" step="0.5">
       <button id="addLineMode" class="primary">線ツールにする</button>
-      <div class="hint">始点で押して終点までドラッグします。Shiftを押しながら描くと、水平・垂直に固定します。描いた線はクリックして選択し、ドラッグや矢印キーで移動できます。</div>
+      <div class="hint">始点で押して終点までドラッグします。Shiftを押しながら描くと、水平・垂直に固定します。描いた線はクリックして選択し、ドラッグや矢印キーで移動できます。選択中に H で水平、V で垂直にもできます。</div>
     </div>
     <div class="section">
       <h2>文字入力 α</h2>
@@ -178,7 +178,19 @@
   function commitFloating(){ if(!floating) return; pushUndo(); bctx.putImageData(floating.data,Math.round(floating.x),Math.round(floating.y)); selection={x:Math.round(floating.x),y:Math.round(floating.y),w:floating.w,h:floating.h}; floating=null; status.textContent='移動・貼り付けを確定しました'; drawOverlay(); }
   function whiteSelection(){ if(!selection) return; pushUndo(); bctx.save(); bctx.fillStyle='#fff'; bctx.fillRect(selection.x,selection.y,selection.w,selection.h); bctx.restore(); status.textContent='白塗りしました'; drawOverlay(); }
   function getTextAt(p){ for(let i=texts.length-1;i>=0;i--){ const t=texts[i]; octx.font=`${t.size}px ${t.font}`; const w=octx.measureText(t.text).width, h=t.size*1.25; const pad=12; if(p.x>=t.x-pad && p.y>=t.y-pad && p.x<=t.x+w+pad && p.y<=t.y+h+pad) return t; } return null; }
-  function commitObjectsToBase(){ if(!texts.length && !lines.length) return; pushUndo(); for(const l of lines) drawLineObj(bctx,l); for(const t of texts) drawTextObj(bctx,t); texts=[]; lines=[]; activeText=null; activeLine=null; drawOverlay(); }
+  function commitObjectsToBase(){
+    // Build 021b: 線はオブジェクトとして保持します。ここで画像へ焼き込むと、移動後に消えたように見えるためです。
+    // 保存時には base + lines + texts を合成してPNG化します。
+    if(activeLine){ status.textContent='線の位置を確定しました'; drawOverlay(); return; }
+    if(activeText){ status.textContent='文字の位置を確定しました'; drawOverlay(); return; }
+    if(!texts.length && !lines.length){ status.textContent='確定する編集オブジェクトはありません'; return; }
+    status.textContent='編集オブジェクトは保存時に合成されます'; drawOverlay();
+  }
+  function normalizeLineToAxis(l){
+    const dx=Math.abs(l.x2-l.x1), dy=Math.abs(l.y2-l.y1);
+    if(dx>=dy){ l.y2=l.y1; } else { l.x2=l.x1; }
+    selection=lineBounds(l);
+  }
 
   fileInput.addEventListener('change', e=>{ const f=e.target.files[0]; if(!f) return; const url=URL.createObjectURL(f); const im=new Image(); im.onload=()=>{ img=im; resizeCanvas(im.naturalWidth, im.naturalHeight); bctx.clearRect(0,0,base.width,base.height); bctx.drawImage(im,0,0); selection=null; floating=null; clip=null; texts=[]; lines=[]; activeText=null; activeLine=null; undoStack=[]; imgInfo.textContent=`${im.naturalWidth} × ${im.naturalHeight}px`; status.textContent='画像を開きました'; setZoom(Math.min(1, (wrap.clientWidth-30)/im.naturalWidth)); drawOverlay(); URL.revokeObjectURL(url); }; im.src=url; });
 
@@ -199,11 +211,19 @@
     if(drag.type==='text'){ activeText.x=Math.round(drag.ox+(p.x-drag.start.x)); activeText.y=Math.round(drag.oy+(p.y-drag.start.y)); drawOverlay(); return; }
     if(drag.type==='lineMove'){ const dx=Math.round(p.x-drag.start.x), dy=Math.round(p.y-drag.start.y); activeLine.x1=drag.ox1+dx; activeLine.y1=drag.oy1+dy; activeLine.x2=drag.ox2+dx; activeLine.y2=drag.oy2+dy; drawOverlay(); return; }
   });
-  window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました'; makeFloatingFromSelection(); }
+  window.addEventListener('mouseup', e=>{ if(!drag) return; const was=drag.type; const savedDrag=drag; drag=null; if(was==='pan') over.style.cursor='grab'; if(was==='select'){ status.textContent='範囲を選択しました'; makeFloatingFromSelection(); }
     if(was==='selectWhite'){ whiteSelection(); }
-    if(was==='line' && linePreview){ lines.forEach(l=>l.selected=false); texts.forEach(t=>t.selected=false); linePreview.selected=true; lines.push(linePreview); activeLine=linePreview; activeText=null; selection=lineBounds(linePreview); linePreview=null; status.textContent='線を作成しました。クリックして移動できます'; drawOverlay(); }
+    if(was==='line' && linePreview){
+      // mouseup時にもShift状態を反映して、水平・垂直固定を確実にします。
+      if(e.shiftKey){ normalizeLineToAxis(linePreview); }
+      lines.forEach(l=>l.selected=false); texts.forEach(t=>t.selected=false);
+      linePreview.selected=true; lines.push(linePreview); activeLine=linePreview; activeText=null; selection=lineBounds(linePreview); linePreview=null;
+      status.textContent='線を作成しました。クリックして移動できます。Shiftを押して作成すると水平・垂直固定です'; drawOverlay();
+    }
   });
   window.addEventListener('keydown', e=>{ const step=e.shiftKey?10:1; let used=false; if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){ let dx=0,dy=0; if(e.key==='ArrowLeft')dx=-step; if(e.key==='ArrowRight')dx=step; if(e.key==='ArrowUp')dy=-step; if(e.key==='ArrowDown')dy=step; if(floating){ floating.x+=dx; floating.y+=dy; selection={x:floating.x,y:floating.y,w:floating.w,h:floating.h}; used=true; } else if(activeText){ activeText.x+=dx; activeText.y+=dy; used=true; } else if(activeLine){ activeLine.x1+=dx; activeLine.x2+=dx; activeLine.y1+=dy; activeLine.y2+=dy; selection=lineBounds(activeLine); used=true; } if(used){ e.preventDefault(); drawOverlay(); } }
+    if(activeLine && e.key.toLowerCase()==='h'){ e.preventDefault(); activeLine.y2=activeLine.y1; selection=lineBounds(activeLine); status.textContent='線を水平にしました'; drawOverlay(); }
+    if(activeLine && e.key.toLowerCase()==='v'){ e.preventDefault(); activeLine.x2=activeLine.x1; selection=lineBounds(activeLine); status.textContent='線を垂直にしました'; drawOverlay(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'){ e.preventDefault(); if(selection){ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; } } }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'){ e.preventDefault(); pasteAtOffset(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); restoreUndo(); }
