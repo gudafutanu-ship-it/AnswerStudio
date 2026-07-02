@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Answer Studio Build 022 - 文字ツール安定版</title>
+<title>Answer Studio Build 023 - 文字ツール完成版</title>
 <style>
   :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<header><h1>Answer Studio</h1><span class="tag">Build 022｜文字ツール安定版</span></header>
+<header><h1>Answer Studio</h1><span class="tag">Build 023｜文字ツール完成版</span></header>
 <div class="app">
   <aside class="panel left">
     <div class="section">
@@ -96,9 +96,12 @@
       <label class="small">文字</label><input id="textValue" value="問8">
       <label class="small">フォント</label><select id="fontFamily"><option value="Yu Mincho, YuMincho, 'Hiragino Mincho ProN', serif">明朝</option><option value="Yu Gothic, YuGothic, Meiryo, sans-serif">ゴシック</option></select>
       <label class="small">サイズ pt</label><input id="fontSize" type="number" value="18" step="0.5">
+      <label class="small">太さ</label><select id="fontWeight"><option value="300">細い</option><option value="400" selected>標準</option><option value="600">やや太い</option><option value="700">太い</option><option value="900">極太</option></select>
+      <label class="small">縦書き文字間隔 px</label><input id="charGap" type="number" value="0" step="0.5">
       <label class="small" style="display:flex;align-items:center;gap:8px;margin:6px 0 8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px"><input id="verticalText" type="checkbox" style="width:auto;margin:0"> 縦書き（一文字ずつ縦に並べる）</label>
+      <button id="applyTextBtn" class="ok">選択中の文字に反映</button>
       <button id="addTextMode" class="primary">文字入力ツールにする</button>
-      <div class="hint">文字は青枠で選択されます。縦書きにしたい場合は、先に「縦書き」にチェックを入れてから配置します。配置後は自動で範囲選択に戻るので、クリックするたびに増え続けません。青枠内をドラッグで移動、矢印キーで1px移動、Shift＋矢印で10px移動できます。Deleteで選択文字を削除できます。</div>
+      <div class="hint">Build 023は文字ツールの仕上げ版です。文字を選択すると設定欄に内容が入り、サイズ・太さ・文字間隔を変更して「選択中の文字に反映」で更新できます。青枠内をドラッグで移動、矢印キーで1px移動、Shift＋矢印で10px移動、Deleteで削除できます。</div>
     </div>
     <div class="section">
       <h2>保存</h2>
@@ -158,13 +161,13 @@
 
   function textRect(t){
     octx.save();
-    octx.font=`${t.size}px ${t.font}`;
+    octx.font=`${t.weight||400} ${t.size}px ${t.font}`;
     let w, h;
     if(t.vertical){
       const chars=[...String(t.text||'')];
       let maxW=0;
       for(const ch of chars){ maxW=Math.max(maxW, octx.measureText(ch).width); }
-      w=maxW; h=Math.max(t.size, chars.length*t.size*1.12);
+      w=maxW; h=Math.max(t.size, chars.length*(t.size*1.12 + (t.charGap||0))); 
     }else{
       w=octx.measureText(t.text).width; h=t.size*1.25;
     }
@@ -173,16 +176,36 @@
   }
   function drawTextObj(ctx,t){
     ctx.save();
-    ctx.font=`${t.size}px ${t.font}`;
+    ctx.font=`${t.weight||400} ${t.size}px ${t.font}`;
     ctx.fillStyle='#111';
     ctx.textBaseline='top';
     if(t.vertical){
       let y=t.y;
-      for(const ch of [...String(t.text||'')]){ ctx.fillText(ch,t.x,y); y+=t.size*1.12; }
+      for(const ch of [...String(t.text||'')]){ ctx.fillText(ch,t.x,y); y+=t.size*1.12 + (t.charGap||0); }
     }else{
       ctx.fillText(t.text,t.x,t.y);
     }
     ctx.restore();
+  }
+  function syncTextPanel(t){
+    if(!t) return;
+    document.getElementById('textValue').value = t.text || '';
+    document.getElementById('fontFamily').value = t.font;
+    document.getElementById('fontSize').value = (t.size*72/96).toFixed(1).replace(/\.0$/,'');
+    document.getElementById('fontWeight').value = String(t.weight || 400);
+    document.getElementById('charGap').value = t.charGap || 0;
+    document.getElementById('verticalText').checked = !!t.vertical;
+  }
+  function applyTextPanel(){
+    if(!activeText){ status.textContent='反映する文字が選択されていません'; return; }
+    activeText.text = document.getElementById('textValue').value || '';
+    activeText.font = document.getElementById('fontFamily').value;
+    activeText.size = parseFloat(document.getElementById('fontSize').value||18)*96/72;
+    activeText.weight = parseInt(document.getElementById('fontWeight').value||400,10);
+    activeText.charGap = parseFloat(document.getElementById('charGap').value||0);
+    activeText.vertical = document.getElementById('verticalText').checked;
+    status.textContent='選択中の文字に設定を反映しました';
+    drawOverlay();
   }
   function drawLineObj(ctx,l,preview=false){ ctx.save(); ctx.strokeStyle=preview?'#2563eb':'#111'; ctx.lineWidth=Math.max(1,l.w); if(preview) ctx.setLineDash([6,4]); ctx.beginPath(); ctx.moveTo(l.x1,l.y1); ctx.lineTo(l.x2,l.y2); ctx.stroke(); ctx.restore(); }
   function drawLineSelection(l){ const b=lineBounds(l); drawDashedRect(octx,{x:b.x-6,y:b.y-6,w:b.w+12,h:b.h+12},'#2563eb'); octx.save(); octx.fillStyle='#fff'; octx.strokeStyle='#2563eb'; octx.lineWidth=2/zoom; for(const pt of [{x:l.x1,y:l.y1},{x:l.x2,y:l.y2}]){ octx.fillRect(pt.x-4,pt.y-4,8,8); octx.strokeRect(pt.x-4,pt.y-4,8,8); } octx.restore(); }
@@ -224,10 +247,10 @@
 
   over.addEventListener('mousedown', e=>{ if(!base.width) return; const p=canvasPoint(e);
     if(mode==='pan'){ drag={type:'pan',sx:e.clientX,sy:e.clientY,sl:wrap.scrollLeft,st:wrap.scrollTop}; over.style.cursor='grabbing'; return; }
-    const hitText=getTextAt(p); if(hitText){ texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); hitText.selected=true; activeText=hitText; activeLine=null; drag={type:'text',start:p,ox:hitText.x,oy:hitText.y}; status.textContent='文字を選択しました'; drawOverlay(); return; }
+    const hitText=getTextAt(p); if(hitText){ texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); hitText.selected=true; activeText=hitText; activeLine=null; syncTextPanel(hitText); drag={type:'text',start:p,ox:hitText.x,oy:hitText.y}; status.textContent='文字を選択しました。設定を変えて反映できます'; drawOverlay(); return; }
     const hitLine=getLineAt(p); if(hitLine && mode!=='line'){ texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); hitLine.selected=true; activeLine=hitLine; activeText=null; drag={type:'lineMove',start:p,ox1:hitLine.x1,oy1:hitLine.y1,ox2:hitLine.x2,oy2:hitLine.y2}; status.textContent='線を選択しました。ドラッグや矢印キーで移動できます'; drawOverlay(); return; }
     if(floating && inRect(p,{x:floating.x,y:floating.y,w:floating.w,h:floating.h})){ drag={type:'floating',start:p,ox:floating.x,oy:floating.y}; return; }
-    if(mode==='text'){ const text=document.getElementById('textValue').value || '文字'; const font=document.getElementById('fontFamily').value; const pt=parseFloat(document.getElementById('fontSize').value||18); const px=pt*96/72; const vertical=document.getElementById('verticalText').checked; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); const t={text,x:Math.round(p.x),y:Math.round(p.y),font,size:px,vertical,selected:true}; texts.push(t); activeText=t; activeLine=null; drag={type:'text',start:p,ox:t.x,oy:t.y}; status.textContent=vertical?'縦書き文字を配置しました':'文字を配置しました'; drawOverlay(); return; }
+    if(mode==='text'){ const text=document.getElementById('textValue').value || '文字'; const font=document.getElementById('fontFamily').value; const pt=parseFloat(document.getElementById('fontSize').value||18); const px=pt*96/72; const vertical=document.getElementById('verticalText').checked; const weight=parseInt(document.getElementById('fontWeight').value||400,10); const charGap=parseFloat(document.getElementById('charGap').value||0); texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); const t={text,x:Math.round(p.x),y:Math.round(p.y),font,size:px,weight,charGap,vertical,selected:true}; texts.push(t); activeText=t; activeLine=null; drag={type:'text',start:p,ox:t.x,oy:t.y}; status.textContent=vertical?'縦書き文字を配置しました':'文字を配置しました'; drawOverlay(); return; }
     if(mode==='line'){ const lw=parseFloat(document.getElementById('lineWidth').value||2); drag={type:'line',start:p,current:p,w:lw}; linePreview={x1:Math.round(p.x),y1:Math.round(p.y),x2:Math.round(p.x),y2:Math.round(p.y),w:lw}; drawOverlay(); return; }
     if(mode==='white'){ drag={type:'selectWhite',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; drawOverlay(); return; }
     drag={type:'select',start:p,current:p}; selection={x:p.x,y:p.y,w:0,h:0}; floating=null; texts.forEach(t=>t.selected=false); lines.forEach(l=>l.selected=false); activeText=null; activeLine=null; drawOverlay();
@@ -260,6 +283,8 @@
     if(activeLine && e.key.toLowerCase()==='h'){ e.preventDefault(); activeLine.y2=activeLine.y1; selection=lineBounds(activeLine); status.textContent='線を水平にしました'; drawOverlay(); }
     if(activeLine && e.key.toLowerCase()==='v'){ e.preventDefault(); activeLine.x2=activeLine.x1; selection=lineBounds(activeLine); status.textContent='線を垂直にしました'; drawOverlay(); }
     if((e.key==='Delete'||e.key==='Backspace') && activeText){ e.preventDefault(); texts=texts.filter(t=>t!==activeText); activeText=null; selection=null; status.textContent='選択中の文字を削除しました'; drawOverlay(); return; }
+    if(activeText && (e.key==='+' || e.key==='=')){ e.preventDefault(); activeText.size += 1; syncTextPanel(activeText); drawOverlay(); }
+    if(activeText && (e.key==='-' || e.key==='_')){ e.preventDefault(); activeText.size = Math.max(4, activeText.size-1); syncTextPanel(activeText); drawOverlay(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'){ e.preventDefault(); if(selection){ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; } } }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'){ e.preventDefault(); pasteAtOffset(); }
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); restoreUndo(); }
@@ -268,6 +293,7 @@
   });
   function pasteAtOffset(){ if(!clip) return; const x=selection?selection.x+20:20, y=selection?selection.y+20:20; floating={data:clip.data,x,y,w:clip.w,h:clip.h,origX:x,origY:y,visible:true}; selection={x,y,w:clip.w,h:clip.h}; status.textContent='貼り付けました。ドラッグして位置を調整し、確定してください'; drawOverlay(); }
 
+  document.getElementById('applyTextBtn').onclick=applyTextPanel;
   document.getElementById('toolSelect').onclick=()=>setMode('select'); document.getElementById('toolWhite').onclick=()=>setMode('white'); document.getElementById('toolText').onclick=()=>setMode('text'); document.getElementById('toolLine').onclick=()=>setMode('line'); document.getElementById('toolPan').onclick=()=>setMode('pan'); document.getElementById('addTextMode').onclick=()=>setMode('text'); document.getElementById('addLineMode').onclick=()=>setMode('line');
   document.getElementById('copyBtn').onclick=()=>{ const d=cropSelection(); if(d){ clip={data:d,w:selection.w,h:selection.h}; status.textContent='コピーしました'; }};
   document.getElementById('pasteBtn').onclick=pasteAtOffset; document.getElementById('commitBtn').onclick=()=>{ if(floating) commitFloating(); else {commitObjectsToBase(); status.textContent='文字・線を画像に確定しました';} };
