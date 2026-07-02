@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Answer Studio Build 023a - 文字ツール微調整版</title>
+<title>Answer Studio Build 024 - 文字ツール完成調整版</title>
 <style>
   :root{--bg:#eef3f8;--panel:#ffffff;--ink:#172033;--muted:#667085;--blue:#2563eb;--line:#d8e1ee;--green:#16a34a;--red:#ef4444;}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<header><h1>Answer Studio</h1><span class="tag">Build 023a｜文字ツール微調整版</span></header>
+<header><h1>Answer Studio</h1><span class="tag">Build 024｜文字ツール完成調整版</span></header>
 <div class="app">
   <aside class="panel left">
     <div class="section">
@@ -98,16 +98,18 @@
       <label class="small">サイズ pt</label><input id="fontSize" type="number" value="18" step="0.5">
       <label class="small">太さ</label><select id="fontWeight"><option value="300">細い</option><option value="400" selected>標準</option><option value="500">少し太い</option><option value="600">やや太い</option><option value="700">太い</option><option value="900">極太</option></select>
       <label class="small">太さ補正 px（輪郭を少し太らせる）</label><input id="strokeWidth" type="number" value="0" min="0" max="3" step="0.1">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px"><button id="strokeMinus">細く -0.1</button><button id="strokePlus">太く +0.1</button></div>
       <div class="hint">0.0＝補正なし。0.2〜0.8くらいで少しずつ太くできます。</div>
       <label class="small">縦書き文字間隔 px</label><input id="charGap" type="number" value="0" step="0.5">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px"><button id="gapMinus">間隔 -1</button><button id="gapPlus">間隔 +1</button></div>
-      <label class="small">上下位置補正</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px"><button id="textUp">上へ 1px</button><button id="textDown">下へ 1px</button></div>
+      <label class="small">文字位置補正</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 6px"><button id="textUp">上へ 1px</button><button id="textDown">下へ 1px</button></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px"><button id="textLeft">左へ 1px</button><button id="textRight">右へ 1px</button></div>
       <label class="small" style="display:flex;align-items:center;gap:8px;margin:6px 0 8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px"><input id="verticalText" type="checkbox" style="width:auto;margin:0"> 縦書き（一文字ずつ縦に並べる）</label>
       <button id="resetTextAdjust">文字調整を初期化</button>
       <button id="applyTextBtn" class="ok">選択中の文字に反映</button>
       <button id="addTextMode" class="primary">文字入力ツールにする</button>
-      <div class="hint">Build 023aは文字ツール微調整版です。太さ補正・文字間隔・上下位置を細かく調整できます。文字を選択すると設定欄に内容が入り、「選択中の文字に反映」で更新できます。青枠内をドラッグ、矢印キーで1px移動、Shift＋矢印で10px移動、Deleteで削除できます。</div>
+      <div class="hint">Build 024は文字ツール完成調整版です。太さ・文字間隔・上下左右位置をボタンで細かく調整できます。文字を選択すると設定欄に内容が入り、「選択中の文字に反映」で更新できます。青枠内をドラッグ、矢印キーで1px移動、Shift＋矢印で10px移動、Deleteで削除できます。</div>
     </div>
     <div class="section">
       <h2>保存</h2>
@@ -310,8 +312,37 @@
   function pasteAtOffset(){ if(!clip) return; const x=selection?selection.x+20:20, y=selection?selection.y+20:20; floating={data:clip.data,x,y,w:clip.w,h:clip.h,origX:x,origY:y,visible:true}; selection={x,y,w:clip.w,h:clip.h}; status.textContent='貼り付けました。ドラッグして位置を調整し、確定してください'; drawOverlay(); }
 
   document.getElementById('applyTextBtn').onclick=applyTextPanel;
+  document.getElementById('resetTextAdjust').onclick=()=>{
+    document.getElementById('strokeWidth').value=0;
+    document.getElementById('charGap').value=0;
+    if(activeText){ activeText.strokeWidth=0; activeText.charGap=0; status.textContent='文字調整を初期化しました'; drawOverlay(); }
+  };
   document.getElementById('toolSelect').onclick=()=>setMode('select'); document.getElementById('toolWhite').onclick=()=>setMode('white'); document.getElementById('toolText').onclick=()=>setMode('text'); document.getElementById('toolLine').onclick=()=>setMode('line'); document.getElementById('toolPan').onclick=()=>setMode('pan'); document.getElementById('addTextMode').onclick=()=>setMode('text'); document.getElementById('addLineMode').onclick=()=>setMode('line');
 
+  function updateStroke(delta){
+    const el=document.getElementById('strokeWidth');
+    let v=parseFloat(el.value||0)+delta; v=Math.max(0,Math.min(3,Math.round(v*10)/10));
+    el.value=v;
+    if(activeText){ activeText.strokeWidth=v; status.textContent='文字の太さ補正を '+v+'px にしました'; drawOverlay(); }
+  }
+  function updateGap(delta){
+    const el=document.getElementById('charGap');
+    let v=parseFloat(el.value||0)+delta; v=Math.round(v*10)/10;
+    el.value=v;
+    if(activeText){ activeText.charGap=v; status.textContent='文字間隔を '+v+'px にしました'; drawOverlay(); }
+  }
+  function moveActiveText(dx,dy){
+    if(!activeText){ status.textContent='移動する文字をクリックして選択してください'; return; }
+    activeText.x+=dx; activeText.y+=dy; syncTextPanel(activeText); drawOverlay();
+  }
+  document.getElementById('strokeMinus').onclick=()=>updateStroke(-0.1);
+  document.getElementById('strokePlus').onclick=()=>updateStroke(0.1);
+  document.getElementById('gapMinus').onclick=()=>updateGap(-1);
+  document.getElementById('gapPlus').onclick=()=>updateGap(1);
+  document.getElementById('textUp').onclick=()=>moveActiveText(0,-1);
+  document.getElementById('textDown').onclick=()=>moveActiveText(0,1);
+  document.getElementById('textLeft').onclick=()=>moveActiveText(-1,0);
+  document.getElementById('textRight').onclick=()=>moveActiveText(1,0);
   document.getElementById('strokeWidth').addEventListener('input',()=>{ if(activeText){ activeText.strokeWidth=parseFloat(document.getElementById('strokeWidth').value||0); drawOverlay(); } });
   document.getElementById('charGap').addEventListener('input',()=>{ if(activeText){ activeText.charGap=parseFloat(document.getElementById('charGap').value||0); drawOverlay(); } });
   document.getElementById('fontSize').addEventListener('input',()=>{ if(activeText){ activeText.size=parseFloat(document.getElementById('fontSize').value||18)*96/72; drawOverlay(); } });
